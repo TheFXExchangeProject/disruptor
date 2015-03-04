@@ -10,7 +10,7 @@ import static org.junit.Assert.assertTrue;
 
 public class DisruptorTest {
     @Test
-    public void testAddToAndRetrieveFromDisruptor() throws DisruptorAlreadyStartedException {
+    public void testAddToAndRetrieveFromDisruptor() throws DisruptorAlreadyStartedException, WriterAlreadyAssignedException {
         final Disruptor<String> disruptor = new Disruptor<>(1024);
 
         final FXReader<String> fxReader = disruptor.getReader();
@@ -35,8 +35,8 @@ public class DisruptorTest {
 
 
     @Test
-    public void testDoesntOverwriteUnreadData() throws InterruptedException, DisruptorAlreadyStartedException {
-        final Disruptor<String> disruptor = new Disruptor<>(1024);
+    public void testDoesntOverwriteUnreadData() throws InterruptedException, DisruptorAlreadyStartedException, WriterAlreadyAssignedException {
+        final Disruptor<String> disruptor = new Disruptor<>(256);
 
         final FXReader<String> fxReader = disruptor.getReader();
         final FXWriter<String> fxWriter = disruptor.getWriter();
@@ -45,16 +45,13 @@ public class DisruptorTest {
 
         final CountDownLatch countDownLatch = new CountDownLatch(1);
         final CountDownLatch testFinished = new CountDownLatch(2);
-        final int TEST_SIZE = 100000000;
+        final int TEST_SIZE = 1000000; //Purposefully large in an attempt to flag any overtaking issues.
 
 
         new Thread(new Runnable() {
             @Override
             public void run() {
                 for (int i = 0; i < TEST_SIZE; i++) {
-                    if (i == 31) {
-                        countDownLatch.countDown();
-                    }
                     fxWriter.writeNext("Example " + i);
                 }
 
@@ -62,24 +59,17 @@ public class DisruptorTest {
             }
         }).start();
 
-
-        try {
-            countDownLatch.await();
-        } catch (InterruptedException e) {
-            // Do nothing if interrupted
-        }
         for (int i = 0; i < TEST_SIZE; i++) {
             assertEquals("Example " + i, fxReader.readNext());
         }
 
         testFinished.countDown();
 
-
         testFinished.await();
     }
 
     @Test
-    public void testMultipleReaders() throws DisruptorAlreadyStartedException, InterruptedException {
+    public void testMultipleReaders() throws DisruptorAlreadyStartedException, InterruptedException, WriterAlreadyAssignedException {
         Disruptor<String> disruptor = new Disruptor<>(1024);
 
         final FXReader<String> firstReader = disruptor.getReader();
@@ -114,6 +104,7 @@ public class DisruptorTest {
                 for (int i = 0; i < TEST_SIZE; i++) {
                     String val = secondReader.readNext();
                     if (!val.equals("TEST " + i)) {
+                        System.out.println("Test 2 failed on :" + i);
                         secondPassed.set(false);
                     }
                 }
