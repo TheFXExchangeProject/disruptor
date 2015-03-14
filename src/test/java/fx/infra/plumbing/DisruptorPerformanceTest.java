@@ -11,24 +11,25 @@ import java.util.concurrent.CountDownLatch;
 
 public class DisruptorPerformanceTest {
     private static final Logger LOGGER = LoggerFactory.getLogger(DisruptorPerformanceTest.class);
-    private static final int BUFFER_SIZE = 10000;
-    private static final int TEST_SIZE = 10000000;
 
     @Test
     public void testPerformance() throws DisruptorAlreadyStartedException, WriterAlreadyAssignedException, NoWriterAssignedException, InterruptedException {
         LOGGER.info("Running warm up run...");
-        performanceTestRun();
+        performanceTestRun(10000, 10000000);
 
-        System.gc();
 
-        LOGGER.info("Running actual run...");
-        performanceTestRun();
+        LOGGER.info("Running actual runs...");
+        performanceTestRun(1024, 10000000);
+        performanceTestRun(2048, 10000000);
+        performanceTestRun(4096, 10000000);
+        performanceTestRun(8192, 10000000);
+        performanceTestRun(16384, 10000000);
     }
 
-    private void performanceTestRun() throws DisruptorAlreadyStartedException, WriterAlreadyAssignedException, NoWriterAssignedException, InterruptedException {
-        Disruptor<TestTracker> disruptor = new Disruptor<>(BUFFER_SIZE);
+    private void performanceTestRun(final int bufferSize, final int testSize) throws DisruptorAlreadyStartedException, WriterAlreadyAssignedException, NoWriterAssignedException, InterruptedException {
+        Disruptor<TestTracker> disruptor = new Disruptor<>(bufferSize);
 
-        final List<TestTracker> store = new ArrayList<>(TEST_SIZE);
+        final List<TestTracker> store = new ArrayList<>(testSize);
         final FXReader<TestTracker> secondReader = disruptor.getReader();
         final FXReader<TestTracker> firstReader = disruptor.getReader();
         final FXWriter<TestTracker> fxWriter = disruptor.getWriter();
@@ -40,7 +41,7 @@ public class DisruptorPerformanceTest {
         new Thread(new Runnable() {
             @Override
             public void run() {
-                for (long i = 0; i < TEST_SIZE; i++) {
+                for (long i = 0; i < testSize; i++) {
                     TestTracker testTracker = firstReader.readNext();
                     testTracker.setFirstRead(System.currentTimeMillis());
                     store.add(testTracker);
@@ -53,7 +54,7 @@ public class DisruptorPerformanceTest {
         new Thread(new Runnable() {
             @Override
             public void run() {
-                for (long i = 0; i < TEST_SIZE; i++) {
+                for (long i = 0; i < testSize; i++) {
                     TestTracker testTracker = secondReader.readNext();
                     testTracker.setSecondRead(System.currentTimeMillis());
                 }
@@ -65,7 +66,7 @@ public class DisruptorPerformanceTest {
         new Thread(new Runnable() {
             @Override
             public void run() {
-                for (long i = 0; i < TEST_SIZE; i++) {
+                for (long i = 0; i < testSize; i++) {
                     fxWriter.writeNext(new TestTracker(System.currentTimeMillis()));
                 }
             }
@@ -79,6 +80,7 @@ public class DisruptorPerformanceTest {
 
         Collections.sort(store);
 
+        LOGGER.info("ResultSet for [testSize: {}], [bufferSizeUsed: {}]", testSize, disruptor.getPowerOfTwo(bufferSize));
         LOGGER.info("Max latency was: {}ms", store.get(store.size() - 1).getTimeOnBuffer());
         LOGGER.info("99.9 percentile latency was: {}ms", store.get((int) (store.size() * 0.999)).getTimeOnBuffer());
         LOGGER.info("99 percentile latency was: {}ms", store.get((int) (store.size() * 0.99)).getTimeOnBuffer());
@@ -87,8 +89,10 @@ public class DisruptorPerformanceTest {
         LOGGER.info("50 percentile latency was: {}ms", store.get((int) (store.size() * 0.50)).getTimeOnBuffer());
         LOGGER.info("Min latency was: {}ms", store.get(0).getTimeOnBuffer());
         LOGGER.info("Total time: {}ms", totalTestTime);
-        LOGGER.info("Mean: {}us", ((double)totalTestTime)/(TEST_SIZE/1000));
-        LOGGER.info("Average throughput: {} ops/s", (long)1000*TEST_SIZE/totalTestTime);
+        LOGGER.info("Mean: {}us", ((double)totalTestTime)/(testSize/1000));
+        LOGGER.info("Average throughput: {} ops/s", (long)1000*testSize/totalTestTime);
+        LOGGER.info("Running cleanup GC");
+        System.gc();
     }
 
     private class TestTracker implements Comparable<TestTracker> {
