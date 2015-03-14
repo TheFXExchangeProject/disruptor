@@ -1,49 +1,61 @@
 package fx.infra.plumbing;
 
 
+import org.junit.Ignore;
 import org.junit.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CountDownLatch;
 
 public class DisruptorPerformanceTest {
     private static final Logger LOGGER = LoggerFactory.getLogger(DisruptorPerformanceTest.class);
 
+    @Ignore("Used for performance testing - don't want to run unless explicity done")
     @Test
     public void testPerformance() throws DisruptorAlreadyStartedException, WriterAlreadyAssignedException, NoWriterAssignedException, InterruptedException {
         LOGGER.info("Running warm up run...");
-        performanceTestRun(10000, 10000000);
-
+        performanceTestRun(10000, 10000000, 2);
 
         LOGGER.info("Running actual runs...");
-        performanceTestRun(1024, 10000000);
-        performanceTestRun(2048, 10000000);
-        performanceTestRun(4096, 10000000);
-        performanceTestRun(8192, 10000000);
-        performanceTestRun(16384, 10000000);
+        performanceTestRun(1024, 10000000, 2);
+        performanceTestRun(2048, 10000000, 2);
+        performanceTestRun(4096, 10000000, 2);
+        performanceTestRun(8192, 10000000, 2);
+        performanceTestRun(16384, 10000000, 2);
     }
 
-    private void performanceTestRun(final int bufferSize, final int testSize) throws DisruptorAlreadyStartedException, WriterAlreadyAssignedException, NoWriterAssignedException, InterruptedException {
+    private void performanceTestRun(final int bufferSize, final int testSize, final int numReaders) throws DisruptorAlreadyStartedException, WriterAlreadyAssignedException, NoWriterAssignedException, InterruptedException {
+        if (numReaders < 1) {
+            LOGGER.error("Cannot run perf test without any readers. [numReaders: {}]", numReaders);
+        }
+
         Disruptor<TestTracker> disruptor = new Disruptor<>(bufferSize);
 
         final List<TestTracker> store = new ArrayList<>(testSize);
-        final FXReader<TestTracker> secondReader = disruptor.getReader();
-        final FXReader<TestTracker> firstReader = disruptor.getReader();
+        final FXReader<TestTracker> mainReader = disruptor.getReader();
+        final List<FXReader<TestTracker>> otherReaders = new ArrayList<>(numReaders);
+        for (int i = 0; i < numReaders - 1; i++) {
+            otherReaders.add(disruptor.getReader());
+        }
+
         final FXWriter<TestTracker> fxWriter = disruptor.getWriter();
 
         disruptor.initialise();
 
-        final CountDownLatch countDownLatch = new CountDownLatch(2);
+        final CountDownLatch countDownLatch = new CountDownLatch(numReaders);
 
         new Thread(new Runnable() {
             @Override
             public void run() {
                 for (long i = 0; i < testSize; i++) {
-                    TestTracker testTracker = firstReader.readNext();
-                    testTracker.setFirstRead(System.currentTimeMillis());
+                    TestTracker testTracker = mainReader.readNext();
+                    testTracker.setReadTime(System.currentTimeMillis());
                     store.add(testTracker);
                 }
 
@@ -51,17 +63,20 @@ public class DisruptorPerformanceTest {
             }
         }).start();
 
-        new Thread(new Runnable() {
-            @Override
-            public void run() {
-                for (long i = 0; i < testSize; i++) {
-                    TestTracker testTracker = secondReader.readNext();
-                    testTracker.setSecondRead(System.currentTimeMillis());
-                }
 
-                countDownLatch.countDown();
-            }
-        }).start();
+        for (final FXReader<TestTracker> reader : otherReaders) {
+            new Thread(new Runnable() {
+                @Override
+                public void run() {
+                    for (long i = 0; i < testSize; i++) {
+                        TestTracker testTracker = reader.readNext();
+                        testTracker.setReadTime(System.currentTimeMillis());
+                    }
+
+                    countDownLatch.countDown();
+                }
+            }).start();
+        }
 
         new Thread(new Runnable() {
             @Override
@@ -97,31 +112,23 @@ public class DisruptorPerformanceTest {
 
     private class TestTracker implements Comparable<TestTracker> {
         private volatile long entryTime;
-        private volatile long firstRead;
-        private volatile long secondRead;
+        private volatile long readTime;
 
         public TestTracker(long entryTime) {
             this.entryTime = entryTime;
         }
 
-        public void setFirstRead(long firstRead) {
-            this.firstRead = firstRead;
-        }
-
-
-        public void setSecondRead(long secondRead) {
-            this.secondRead = secondRead;
+        public void setReadTime(long readTime) {
+            this.readTime = readTime;
         }
 
         @Override
         public int compareTo(TestTracker testTracker) {
-            return (int) ((firstRead - entryTime) - (testTracker.firstRead - testTracker.entryTime));
+            return (int) ((readTime - entryTime) - (testTracker.readTime - testTracker.entryTime));
         }
 
         public long getTimeOnBuffer() {
-            return secondRead > firstRead
-                    ? secondRead - entryTime
-                    : firstRead - entryTime;
+            return readTime - entryTime;
         }
     }
 
