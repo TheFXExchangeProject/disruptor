@@ -88,7 +88,7 @@ public class DisruptorPerformanceTest {
         LOGGER.info("Min latency was: {}ms", store.get(0).getTimeOnBuffer());
         LOGGER.info("Total time: {}ms", totalTestTime);
         LOGGER.info("Mean: {}us", ((double)totalTestTime)/(TEST_SIZE/1000));
-        LOGGER.info("Average throughput: {} ops/s", TEST_SIZE*1000/totalTestTime);
+        LOGGER.info("Average throughput: {} ops/s", (long)1000*TEST_SIZE/totalTestTime);
     }
 
     private class TestTracker implements Comparable<TestTracker> {
